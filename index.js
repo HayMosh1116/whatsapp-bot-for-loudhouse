@@ -14,14 +14,28 @@ async function startBot() {
 
     sock.ev.on("creds.update", saveCreds);
 
-    // 🔑 PAIRING CODE
-    if (!sock.authState.creds.registered) {
-        const phoneNumber = "2349122761580"; // PUT YOUR NUMBER
+    // ✅ WAIT FOR CONNECTION FIRST
+    sock.ev.on("connection.update", async (update) => {
+        const { connection } = update;
 
-        const code = await sock.requestPairingCode(phoneNumber);
-        console.log("🔥 PAIRING CODE:", code);
-    }
+        if (connection === "open") {
+            console.log("✅ Connected to WhatsApp");
 
+            if (!sock.authState.creds.registered) {
+                const phoneNumber = "2349122761580"; // PUT YOUR NUMBER
+
+                const code = await sock.requestPairingCode(phoneNumber);
+                console.log("🔥 PAIRING CODE:", code);
+            }
+        }
+
+        if (connection === "close") {
+            console.log("❌ Connection closed, restarting...");
+            startBot(); // auto reconnect
+        }
+    });
+
+    // 📥 MESSAGE HANDLER
     sock.ev.on("messages.upsert", async ({ messages }) => {
         const msg = messages[0];
         if (!msg.message || msg.key.fromMe) return;
