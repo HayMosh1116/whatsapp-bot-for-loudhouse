@@ -1,7 +1,4 @@
-const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion } = require("@whiskeysockets/baileys");
-
-const badLinks = ["http", "https", "chat.whatsapp.com"];
-let warnings = {};
+const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, DisconnectReason } = require("@whiskeysockets/baileys");
 
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState("auth");
@@ -9,56 +6,63 @@ async function startBot() {
 
     const sock = makeWASocket({
         auth: state,
-        version
+        version,
+        printQRInTerminal: false
     });
 
     sock.ev.on("creds.update", saveCreds);
 
-    // ✅ WAIT FOR CONNECTION FIRST
+    let pairingRequested = false;
+
     sock.ev.on("connection.update", async (update) => {
-        const { connection } = update;
+        const { connection, lastDisconnect } = update;
+
+        if (connection === "connecting") {
+            console.log("🔄 Connecting...");
+        }
 
         if (connection === "open") {
-            console.log("✅ Connected to WhatsApp");
+            console.log("✅ Connected successfully!");
+        }
 
-            if (!sock.authState.creds.registered) {
-                const phoneNumber = "2349122761580"; // PUT YOUR NUMBER
+        // 🔑 SAFE PAIRING (ONLY ONCE + DELAY)
+        if (!pairingRequested && !sock.authState.creds.registered) {
+            pairingRequested = true;
 
-                const code = await sock.requestPairingCode(phoneNumber);
-                console.log("🔥 PAIRING CODE:", code);
-            }
+            setTimeout(async () => {
+                try {
+                    const phoneNumber = "2349122761580"; // PUT YOUR NUMBER
+
+                    const code = await sock.requestPairingCode(phoneNumber);
+                    console.log("🔥 YOUR PAIRING CODE:", code);
+                } catch (err) {
+                    console.log("❌ Pairing error, retrying...");
+                    pairingRequested = false;
+                }
+            }, 5000); // wait 5 seconds
         }
 
         if (connection === "close") {
-            console.log("❌ Connection closed, restarting...");
-            startBot(); // auto reconnect
+            const reason = lastDisconnect?.error?.output?.statusCode;
+
+            console.log("❌ Connection closed. Reason:", reason);
+
+            // 🔁 AUTO RECONNECT
+            if (reason !== DisconnectReason.loggedOut) {
+                startBot();
+            }
         }
     });
 
-    // 📥 MESSAGE HANDLER
+    // 📥 SIMPLE TEST MESSAGE (to confirm bot works)
     sock.ev.on("messages.upsert", async ({ messages }) => {
         const msg = messages[0];
         if (!msg.message || msg.key.fromMe) return;
 
         const from = msg.key.remoteJid;
-        if (!from.endsWith("@g.us")) return;
 
-        const sender = msg.key.participant;
-        const text = (msg.message.conversation || "").toLowerCase();
-
-        if (badLinks.some(link => text.includes(link))) {
-            await sock.sendMessage(from, { delete: msg.key });
-
-            warnings[sender] = (warnings[sender] || 0) + 1;
-
-            await sock.sendMessage(from, {
-                text: `⚠️ @${sender.split("@")[0]} Warning ${warnings[sender]}/3`,
-                mentions: [sender]
-            });
-
-            if (warnings[sender] >= 3) {
-                await sock.groupParticipantsUpdate(from, [sender], "remove");
-            }
+        if (msg.message.conversation === "ping") {
+            await sock.sendMessage(from, { text: "pong 🏓" });
         }
     });
 }
